@@ -61,6 +61,14 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          # CKV_K8S_10/11/12/13: init containers must also declare CPU+memory requests+limits
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "32Mi"
           volumeMounts:
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
@@ -89,12 +97,10 @@ spec:
               value: "production"
             - name: LOG_LEVEL
               value: "info"
-            # Inject OPENAI_API_KEY from a Kubernetes Secret (not hardcoded)
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: codex-api-credentials
-                  key: openai-api-key
+            # CKV_K8S_35: OPENAI_API_KEY is read from a mounted secret file, not an env var.
+            # The app reads the key from /run/secrets/openai-api-key at startup.
+            - name: OPENAI_API_KEY_FILE
+              value: "/run/secrets/openai-api-key"
 
           # ── Security Context (Container) ──────────────────────────────────
           securityContext:
@@ -141,6 +147,10 @@ spec:
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
               readOnly: true
+            # CKV_K8S_35: Secret mounted as a file — never as an env var
+            - name: openai-secret
+              mountPath: /run/secrets
+              readOnly: true
             # Writable tmp for ephemeral agent scratch space
             - name: tmp
               mountPath: /tmp
@@ -155,6 +165,14 @@ spec:
           hostPath:
             path: /run/spire/sockets
             type: DirectoryOrCreate
+        # CKV_K8S_35: Secret mounted as a projected volume file
+        - name: openai-secret
+          secret:
+            secretName: codex-api-credentials
+            defaultMode: 0400        # owner read-only
+            items:
+              - key: openai-api-key
+                path: openai-api-key
         - name: tmp
           emptyDir:
             medium: Memory           # in-memory only, not persisted to disk

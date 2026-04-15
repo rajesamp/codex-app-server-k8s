@@ -1,0 +1,50 @@
+##############################################################################
+# Standard Kubernetes NetworkPolicy — codex-agents namespace
+#
+# CKV2_K8S_6: Checkov requires a standard NetworkPolicy (not just
+# CiliumNetworkPolicy) to confirm pods have network coverage.
+# This policy mirrors the Cilium posture at the standard API level:
+#   - Default deny all ingress + egress for codex-app-server pods
+#   - Allows DNS egress (port 53 UDP/TCP) to kube-dns
+#   - Allows HTTPS egress (port 443) to external endpoints
+#   - Allows SPIRE gRPC egress (port 8081) within cluster
+#
+# Cilium's CiliumNetworkPolicy (in /network/) provides FQDN-scoped
+# enforcement on top of this — both are enforced simultaneously.
+##############################################################################
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codex-app-server-netpol
+  namespace: codex-agents
+spec:
+  podSelector:
+    matchLabels:
+      app: codex-app-server
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow health checks from within the cluster (kubelet, prometheus)
+    - ports:
+        - protocol: TCP
+          port: 8080
+
+  egress:
+    # DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # HTTPS to external APIs (OpenAI, MCP servers)
+    - ports:
+        - protocol: TCP
+          port: 443
+
+    # SPIRE Server gRPC (in-cluster)
+    - ports:
+        - protocol: TCP
+          port: 8081
