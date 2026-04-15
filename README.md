@@ -2,6 +2,8 @@
 
 > Self-hosted [OpenAI Codex App Server](https://developers.openai.com/codex/app-server) running on Kubernetes with [Agent Sandbox](https://sigs.k8s.io/agent-sandbox) — Kata Containers isolation, SPIFFE/SPIRE workload identity, Cilium default-deny egress, and full supply chain security. Your agents, your infrastructure, your terms.
 
+![CI](https://github.com/rajesamp/codex-app-server-k8s/actions/workflows/build-sign-sbom.yaml/badge.svg?branch=main)
+
 ---
 
 ## What This Is
@@ -18,6 +20,35 @@ This repo gives you Claude-style managed agents on your own Kubernetes cluster:
 | Image supply chain | Chainguard distroless + cosign keyless signing + syft SBOM |
 | Provenance | SLSA Build Level 3 via slsa-github-generator |
 | Admission enforcement | Kyverno — digest, signature, SBOM, RuntimeClass, pod security |
+
+---
+
+## CI Pipeline
+
+The `Build, Sign, SBOM & Provenance` workflow runs on every push to `main` and can be triggered manually from the Actions tab. All 8 jobs must pass for a release to be considered production-ready.
+
+| Job | What It Does | Must Pass |
+|---|---|---|
+| IaC Security Scan (Checkov) | Scans `manifests/` — 104 Kubernetes checks, 0 failures | Yes |
+| Build & Push Image | Multi-stage Chainguard build, pushed to GHCR with digest | Yes |
+| Trivy Vulnerability Scan | Scans the pushed image — blocks on HIGH/CRITICAL CVEs | Yes |
+| Sign Image (cosign keyless) | OIDC keyless signature recorded to Sigstore Rekor | Yes |
+| Generate SBOM | CycloneDX + SPDX via syft, attached as cosign attestation | Yes |
+| Generate SLSA Provenance | SLSA Build Level 3 provenance via slsa-github-generator | Yes |
+
+SARIF results from Checkov and Trivy are uploaded to the **Security → Code scanning** tab (GitHub Advanced Security, enabled on this public repo) and also saved as downloadable workflow artifacts for 90 days.
+
+### Notes from CI hardening
+
+A number of issues were resolved during initial CI bring-up — documented here so contributors understand the constraints:
+
+- **Checkov (CKV_K8S_10/11/12/13)** — Resource requests and limits are required on init containers as well as main containers. The `spire-wait` init container has its own `resources` block.
+- **Checkov (CKV_K8S_35)** — Secrets must be mounted as files, not injected as environment variables. `OPENAI_API_KEY` is projected as a volume at `/run/secrets/openai-api-key` (mode `0400`) and read via `OPENAI_API_KEY_FILE`.
+- **Checkov (CKV2_K8S_6)** — A standard `NetworkPolicy` must exist alongside `CiliumNetworkPolicy` for Checkov to recognise network coverage. `manifests/networkpolicy.yaml` mirrors the Cilium posture at the Kubernetes API level; both enforce simultaneously.
+- **SARIF upload** — `github/codeql-action/upload-sarif` requires GitHub Advanced Security. On private repos this step is marked `continue-on-error: true` with an artifact fallback. On this public repo GHAS is active and the upload succeeds.
+- **Trivy action tag** — The correct pinned tag format is `aquasecurity/trivy-action@v0.35.0` (with `v` prefix). `@0.28.0` without the prefix does not resolve.
+- **Image digests** — All `cgr.dev/chainguard/*` references use real SHA256 digests pinned at build time. Renovate Bot opens weekly PRs to keep them current.
+- **`npm ci` requires `package-lock.json`** — A lockfile must be committed alongside `package.json`. The Dockerfile uses `--omit=dev` (replaces deprecated `--only=production`) and `mkdir -p node_modules` before `npm ci` so the builder stage always produces a `node_modules` directory for the final `COPY --from=builder` stage, even when there are zero dependencies.
 
 ---
 
@@ -73,6 +104,9 @@ Codex discovers skills at runtime from `/skills` — no image rebuild, no pod re
 ```
 .
 ├── Dockerfile                          # Multi-stage, Chainguard distroless, pinned digests
+├── package.json                        # Node.js manifest (skeleton — replace with your impl)
+├── package-lock.json                   # Lockfile required for npm ci in Docker build
+├── src/index.js                        # Skeleton server: /healthz, /readyz, skill discovery
 ├── renovate.json                       # Weekly Chainguard digest update PRs
 ├── manifests/
 │   ├── namespace.yaml                  # codex-agents NS with PSS restricted
@@ -80,6 +114,7 @@ Codex discovers skills at runtime from `/skills` — no image rebuild, no pod re
 │   ├── serviceaccount.yaml             # SA + empty RBAC (zero K8s API access)
 │   ├── skills-configmap.yaml           # Skill definitions (mounted at /skills)
 │   ├── deployment.yaml                 # Codex App Server Deployment
+│   ├── networkpolicy.yaml              # Standard K8s NetworkPolicy (mirrors Cilium posture)
 │   └── service.yaml                    # ClusterIP Service
 ├── spire/
 │   ├── spire-server.yaml               # SPIRE Server StatefulSet + RBAC
@@ -121,11 +156,12 @@ Checkov IaC scan → Trivy CVE block → cosign keyless sign → syft CycloneDX 
 | Digest | SHA256 pinned in all manifests | Kyverno `require-image-digest` |
 | Signature | cosign keyless (OIDC/Rekor) | Kyverno `verify-image-signature` |
 | SBOM | CycloneDX cosign attestation | Kyverno `verify-sbom-attestation` |
+| NetworkPolicy | Standard K8s + Cilium FQDN policies in parallel | `networkpolicy.yaml` + `network/` |
 | Isolation | Kata QEMU micro-VM | Kyverno `require-kata-runtimeclass` |
 | Filesystem | Read-only root, memory-backed /tmp | Kyverno `require-readonly-rootfs` |
 | Privileges | No capabilities, no escalation | Kyverno `disallow-privilege-escalation` |
+| Secret handling | Secrets mounted as files (mode 0400), never env vars | `deployment.yaml` |
 | Identity | SPIFFE/SPIRE SVID (1h TTL, auto-rotate) | SPIRE Agent DaemonSet |
-| Networking | Default-deny + FQDN egress allowlist | Cilium CiliumNetworkPolicy |
 
 ---
 
@@ -136,12 +172,23 @@ Renovate Bot opens weekly PRs with updated Chainguard image digests. Review and 
 To manually update:
 
 ```bash
+# Install crane
+brew install crane   # or: go install github.com/google/go-containerregistry/cmd/crane@latest
+
 # Get latest Chainguard node digest
 crane digest cgr.dev/chainguard/node:latest
 
-# Update manifests/deployment.yaml and Dockerfile, then apply
+# Update Dockerfile and manifests/deployment.yaml, then commit and push
 kubectl apply -f manifests/deployment.yaml
 ```
+
+---
+
+## Customising for Production
+
+Replace the skeleton `src/index.js` with your actual Codex App Server implementation. The skeleton serves `/healthz` and `/readyz` probes and reads from `CODEX_SKILLS_DIR` and `OPENAI_API_KEY_FILE` — your implementation should do the same.
+
+Update MCP server FQDNs in `network/codex-egress-policy.yaml` to match your real MCP endpoints before deploying.
 
 ---
 
