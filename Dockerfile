@@ -17,7 +17,11 @@ WORKDIR /app
 
 # Copy package manifests first for layer cache efficiency
 COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts
+
+# Install production dependencies.
+# mkdir ensures node_modules exists even when there are no dependencies,
+# so the COPY --from=builder in the final stage always succeeds.
+RUN mkdir -p node_modules && npm ci --omit=dev --ignore-scripts
 
 # Copy application source
 COPY src/ ./src/
