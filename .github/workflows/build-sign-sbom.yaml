@@ -31,6 +31,8 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}/codex-app-server
+  # Use Node.js 24 runtime for all JS-based actions (avoids Node 20 deprecation)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # ── Job 1: IaC Security Scan ──────────────────────────────────────────────
@@ -49,9 +51,26 @@ jobs:
           output_format: sarif
           output_file_path: checkov-results.sarif
 
-      - name: Upload Checkov SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+      # Upload SARIF as a downloadable workflow artifact (always available).
+      # The CodeQL upload-sarif step below requires GitHub Advanced Security
+      # (GHAS), which is only available on public repos or GitHub Enterprise.
+      # continue-on-error: true ensures the pipeline doesn't fail if GHAS
+      # is not enabled — the artifact upload above is the primary record.
+      - name: Upload Checkov SARIF as artifact
+        uses: actions/upload-artifact@v4
         if: always()
+        with:
+          name: checkov-sarif-${{ github.sha }}
+          path: checkov-results.sarif
+          retention-days: 90
+
+      - name: Upload Checkov SARIF to GitHub Security tab (GHAS optional)
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        # GHAS is required for SARIF upload to the Security tab.
+        # This step is non-blocking so the pipeline passes on private repos
+        # without Advanced Security. Enable GHAS to activate this step.
+        continue-on-error: true
         with:
           sarif_file: checkov-results.sarif
 
@@ -121,9 +140,18 @@ jobs:
           exit-code: '1'     # Block pipeline on HIGH/CRITICAL CVEs
           ignore-unfixed: true
 
-      - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload Trivy SARIF as artifact
+        uses: actions/upload-artifact@v4
         if: always()
+        with:
+          name: trivy-sarif-${{ github.sha }}
+          path: trivy-results.sarif
+          retention-days: 90
+
+      - name: Upload Trivy SARIF to GitHub Security tab (GHAS optional)
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        continue-on-error: true
         with:
           sarif_file: trivy-results.sarif
 
