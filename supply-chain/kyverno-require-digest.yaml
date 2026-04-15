@@ -1,0 +1,49 @@
+##############################################################################
+# Kyverno Policy: Require Image Digest
+# Blocks any pod whose container image is referenced by tag only (e.g. :latest).
+# All images MUST be pinned with a SHA256 digest.
+# This prevents tag mutation attacks and ensures immutable, auditable deployments.
+##############################################################################
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-image-digest
+  annotations:
+    policies.kyverno.io/title: Require Image Digest
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >
+      All container images must be pinned with a SHA256 digest.
+      Tag-only references are blocked to prevent mutable tag exploits
+      and ensure every deployed image is cryptographically verifiable.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-image-digest
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [codex-agents]
+      validate:
+        message: >
+          Image '{{ request.object.spec.containers[].image }}' must be
+          pinned with a SHA256 digest (e.g. image@sha256:...).
+          Tag-only references are not permitted in production.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ contains(element.image, '@sha256:') }}"
+                    operator: Equals
+                    value: false
+          - list: "request.object.spec.initContainers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ contains(element.image, '@sha256:') }}"
+                    operator: Equals
+                    value: false

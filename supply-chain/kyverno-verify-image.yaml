@@ -1,0 +1,90 @@
+##############################################################################
+# Kyverno Policy: Verify Image Signatures (cosign)
+# Blocks container images that do not have a valid cosign signature
+# attached to the registry. Images must be signed by the pipeline key.
+#
+# Prerequisites:
+#   - Images are signed in CI via: cosign sign --key cosign.key <image>@<digest>
+#   - The cosign public key is stored in the `cosign-public-key` ConfigMap.
+#   - Kyverno is installed with the `--allowInsecureRegistry=false` flag.
+##############################################################################
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signature
+  annotations:
+    policies.kyverno.io/title: Verify Image Signature (cosign)
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >
+      All container images in codex-agents must carry a valid cosign
+      signature produced by the organization's CI pipeline key.
+      Unsigned or tampered images are blocked at admission.
+spec:
+  validationFailureAction: Enforce
+  background: false   # Only validate at admission — not retroactively
+  rules:
+    - name: verify-codex-image-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [codex-agents]
+      verifyImages:
+        - imageReferences:
+            # Match all Chainguard images used in this repo
+            - "cgr.dev/chainguard/*"
+          # Use keyless verification via Sigstore/Fulcio + Rekor transparency log
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/YOUR_ORG/codex-app-server-k8s/.github/workflows/build-sign-sbom.yaml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+          # Also verify the image was built by our pipeline (OIDC-based keyless signing)
+          mutateDigest: true      # Kyverno will mutate tag refs to digest refs automatically
+          verifyDigest: true
+          required: true
+---
+##############################################################################
+# Kyverno Policy: Verify SBOM Attestation
+# Requires every image to have a CycloneDX or SPDX SBOM attached as a
+# cosign attestation. Blocks images without a verifiable SBOM.
+##############################################################################
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-sbom-attestation
+  annotations:
+    policies.kyverno.io/title: Require SBOM Attestation
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >
+      Container images must have a CycloneDX SBOM attached as a cosign
+      attestation. This ensures every deployed image has a verifiable
+      software bill of materials for vulnerability tracking and auditing.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: verify-sbom
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [codex-agents]
+      verifyImages:
+        - imageReferences:
+            - "cgr.dev/chainguard/*"
+          attestations:
+            - type: https://cyclonedx.org/bom
+              attestors:
+                - count: 1
+                  entries:
+                    - keyless:
+                        subject: "https://github.com/YOUR_ORG/codex-app-server-k8s/.github/workflows/build-sign-sbom.yaml@refs/heads/main"
+                        issuer: "https://token.actions.githubusercontent.com"

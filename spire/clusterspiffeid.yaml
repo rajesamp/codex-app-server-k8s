@@ -1,0 +1,32 @@
+##############################################################################
+# ClusterSPIFFEID — Automatic SVID assignment
+# The SPIRE Controller Manager watches for pods matching this selector
+# and automatically registers entries with the SPIRE server.
+# No manual entry registration is needed.
+##############################################################################
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: codex-agent-identity
+spec:
+  # SPIFFE ID template: resolves to the pod's namespace and service account
+  spiffeIDTemplate: "spiffe://cluster.local/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+
+  # Only pods in codex-agents namespace with this SA get an SVID
+  podSelector:
+    matchLabels:
+      app: codex-app-server
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: codex-agents
+
+  # DNS SANs in the SVID for service discovery
+  dnsNameTemplates:
+    - "{{ .PodMeta.Name }}.codex-agents.svc.cluster.local"
+    - "codex-app-server.codex-agents.svc.cluster.local"
+
+  # SVIDs are automatically renewed before expiry
+  ttl: "1h"
+
+  # Downstream workloads (e.g. MCP servers) can verify this SPIFFE ID
+  # using the trust bundle from the SPIRE server's trust domain.

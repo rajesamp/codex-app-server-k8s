@@ -1,0 +1,45 @@
+##############################################################################
+# Default-deny CiliumNetworkPolicy — codex-agents namespace
+# All ingress and egress is denied unless explicitly allowed by a
+# subsequent CiliumNetworkPolicy. This is the foundational zero-trust posture.
+##############################################################################
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: codex-agents
+spec:
+  # Apply to ALL pods in the namespace
+  endpointSelector: {}
+  # No ingress rules = deny all ingress
+  ingress: []
+  # No egress rules = deny all egress
+  egress: []
+---
+##############################################################################
+# Allow ingress only from the same namespace (pod-to-pod within codex-agents)
+# and from the kube-system DNS service (CoreDNS).
+##############################################################################
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: codex-agents
+spec:
+  endpointSelector: {}
+  egress:
+    # Allow DNS resolution via CoreDNS in kube-system
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*.cluster.local"
+              - matchPattern: "*.svc.cluster.local"

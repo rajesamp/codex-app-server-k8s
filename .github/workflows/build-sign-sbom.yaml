@@ -1,0 +1,224 @@
+##############################################################################
+# GitHub Actions Workflow: Build → Sign → SBOM → Provenance
+#
+# Supply Chain Security pipeline:
+#   1. Build image from Chainguard base (pinned digest)
+#   2. Push to registry with digest
+#   3. Sign with cosign (keyless, OIDC-backed, Sigstore Rekor transparency log)
+#   4. Generate CycloneDX SBOM with syft and attach as cosign attestation
+#   5. Generate SLSA provenance attestation via slsa-github-generator
+#   6. Run Trivy vulnerability scan — block if HIGH/CRITICAL CVEs found
+#   7. Run Checkov IaC scan on Kubernetes manifests
+##############################################################################
+name: Build, Sign, SBOM & Provenance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'src/**'
+      - 'manifests/**'
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write       # Required for OIDC keyless cosign signing
+  packages: write       # Required for pushing to GHCR
+  attestations: write   # Required for SLSA provenance
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/codex-app-server
+
+jobs:
+  # ── Job 1: IaC Security Scan ──────────────────────────────────────────────
+  iac-scan:
+    name: IaC Security Scan (Checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Checkov on Kubernetes manifests
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: manifests/
+          framework: kubernetes
+          soft_fail: false
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: Upload Checkov SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+  # ── Job 2: Build & Push ───────────────────────────────────────────────────
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: iac-scan
+    outputs:
+      image-digest: ${{ steps.push.outputs.digest }}
+      image-ref: ${{ steps.push.outputs.image-ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - name: Build and push image (digest-pinned)
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Build provenance and SBOM metadata baked into the image manifest
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Output digest
+        run: |
+          echo "Image digest: ${{ steps.push.outputs.digest }}"
+          echo "IMAGE_REF=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}" >> $GITHUB_ENV
+
+  # ── Job 3: Vulnerability Scan ─────────────────────────────────────────────
+  trivy-scan:
+    name: Trivy Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Run Trivy against pushed image
+        uses: aquasecurity/trivy-action@0.28.0   # Pinned by version, not tag
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '1'     # Block pipeline on HIGH/CRITICAL CVEs
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── Job 4: Sign with cosign (keyless) ────────────────────────────────────
+  sign:
+    name: Sign Image (cosign keyless)
+    runs-on: ubuntu-latest
+    needs: [build, trivy-scan]
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.4.1   # Pinned version
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign image with cosign (keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign --yes \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}"
+        # The signature is recorded to Rekor transparency log automatically.
+        # Verifiable with: cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        #   --certificate-identity-regexp "https://github.com/YOUR_ORG/.*" \
+        #   <image>@<digest>
+
+  # ── Job 5: Generate & Attach SBOM ────────────────────────────────────────
+  sbom:
+    name: Generate SBOM (syft + cosign attest)
+    runs-on: ubuntu-latest
+    needs: [build, sign]
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+        with:
+          syft-version: v1.18.0   # Pinned version
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          syft "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}" \
+            -o cyclonedx-json=sbom.cyclonedx.json \
+            -o spdx-json=sbom.spdx.json
+
+      - name: Attach SBOM as cosign attestation
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign attest --yes \
+            --predicate sbom.cyclonedx.json \
+            --type cyclonedx \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}"
+
+      - name: Upload SBOM as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: |
+            sbom.cyclonedx.json
+            sbom.spdx.json
+          retention-days: 90
+
+  # ── Job 6: SLSA Provenance ────────────────────────────────────────────────
+  provenance:
+    name: Generate SLSA Provenance
+    needs: [build]
+    if: github.event_name != 'pull_request'
+    # SLSA generator MUST run on a separate job with its own permissions
+    permissions:
+      actions: read
+      id-token: write
+      packages: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0
+    with:
+      image: ghcr.io/${{ github.repository }}/codex-app-server
+      digest: ${{ needs.build.outputs.image-digest }}
+      registry-username: ${{ github.actor }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}

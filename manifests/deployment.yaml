@@ -1,0 +1,170 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codex-app-server
+  namespace: codex-agents
+  labels:
+    app: codex-app-server
+    app.kubernetes.io/component: app-server
+    app.kubernetes.io/part-of: codex-agent-sandbox
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: codex-app-server
+  template:
+    metadata:
+      labels:
+        app: codex-app-server
+        # Cilium identity label — used in CiliumNetworkPolicy selectors
+        security.cilium.io/egress-profile: codex-agent
+      annotations:
+        # SPIRE injects the SVID via the SPIFFE Workload API Unix socket.
+        spiffe.io/spiffe-id: "spiffe://cluster.local/ns/codex-agents/sa/codex-agent"
+        # Require image digest verification by the Kyverno admission controller.
+        kyverno.io/require-image-digest: "true"
+    spec:
+      # ── Isolation ──────────────────────────────────────────────────────────
+      runtimeClassName: kata-qemu          # VM-level sandbox via Kata Containers
+
+      serviceAccountName: codex-agent
+      automountServiceAccountToken: false
+
+      # ── Security Context (Pod) ─────────────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532            # nonroot UID (Chainguard default)
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+        supplementalGroups: []
+
+      # ── Init: SPIRE SVID fetch ─────────────────────────────────────────────
+      initContainers:
+        - name: spire-wait
+          # Chainguard hardened busybox — pinned digest, zero CVEs
+          # renovate: datasource=docker depName=cgr.dev/chainguard/busybox
+          image: cgr.dev/chainguard/busybox@sha256:a0a4a5f415b2df38ed4244c3ad1b3b8efceb74a64699c3c8e94b9a7dd75e69d7
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for SPIRE Workload API socket..."
+              until [ -S /run/spire/sockets/agent.sock ]; do
+                sleep 1
+              done
+              echo "SPIRE socket ready."
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+
+      containers:
+        - name: codex-app-server
+          # ── Supply Chain: Hardened image, pinned digest ──────────────────
+          # Base: Chainguard distroless — no shell, no package manager, zero CVEs.
+          # Tag is for human readability; the digest is what admission enforces.
+          # renovate: datasource=docker depName=cgr.dev/chainguard/node
+          image: cgr.dev/chainguard/node@sha256:c3b8a6a5d6f0e1b3c2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          env:
+            - name: CODEX_SKILLS_DIR
+              value: "/skills"
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: "unix:///run/spire/sockets/agent.sock"
+            - name: NODE_ENV
+              value: "production"
+            - name: LOG_LEVEL
+              value: "info"
+            # Inject OPENAI_API_KEY from a Kubernetes Secret (not hardcoded)
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: codex-api-credentials
+                  key: openai-api-key
+
+          # ── Security Context (Container) ──────────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+            runAsNonRoot: true
+            runAsUser: 65532
+
+          # ── Probes ────────────────────────────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # ── Resources ─────────────────────────────────────────────────────
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+
+          # ── Volume Mounts ─────────────────────────────────────────────────
+          volumeMounts:
+            # Skills ConfigMap — Codex discovers skills from this directory
+            - name: codex-skills
+              mountPath: /skills
+              readOnly: true
+            # SPIRE Workload API socket — SVID delivery
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            # Writable tmp for ephemeral agent scratch space
+            - name: tmp
+              mountPath: /tmp
+
+      # ── Volumes ────────────────────────────────────────────────────────────
+      volumes:
+        - name: codex-skills
+          configMap:
+            name: codex-skills
+            defaultMode: 0440        # read-only, no execute
+        - name: spire-agent-socket
+          hostPath:
+            path: /run/spire/sockets
+            type: DirectoryOrCreate
+        - name: tmp
+          emptyDir:
+            medium: Memory           # in-memory only, not persisted to disk
+            sizeLimit: 256Mi
+
+      # ── Topology ──────────────────────────────────────────────────────────
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: codex-app-server

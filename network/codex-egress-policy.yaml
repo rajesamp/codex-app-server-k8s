@@ -1,0 +1,94 @@
+##############################################################################
+# Codex Agent Egress Policy
+# Agents may only reach:
+#   1. SPIRE server (in-cluster, for SVID delivery)
+#   2. Approved MCP servers (declared below — update per your environment)
+#   3. OpenAI API (inference endpoint only)
+# All other egress is blocked by default-deny-all.yaml.
+##############################################################################
+
+# ── 1. SPIRE Server (in-cluster) ──────────────────────────────────────────
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-spire-egress
+  namespace: codex-agents
+spec:
+  endpointSelector:
+    matchLabels:
+      app: codex-app-server
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: spire
+            app: spire-server
+      toPorts:
+        - ports:
+            - port: "8081"
+              protocol: TCP
+---
+# ── 2. Internal MCP Servers ───────────────────────────────────────────────
+# Add one CiliumNetworkPolicy block per approved MCP server.
+# Using FQDN-based egress so Cilium enforces at the DNS level.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-mcp-egress
+  namespace: codex-agents
+spec:
+  endpointSelector:
+    matchLabels:
+      app: codex-app-server
+      security.cilium.io/egress-profile: codex-agent
+  egress:
+    # Internal MCP search server
+    - toFQDNs:
+        - matchName: "mcp.internal.example.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+
+    # Internal MCP code-execution server
+    - toFQDNs:
+        - matchName: "exec.mcp.internal.example.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# ── 3. OpenAI API (inference only) ────────────────────────────────────────
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-openai-egress
+  namespace: codex-agents
+spec:
+  endpointSelector:
+    matchLabels:
+      app: codex-app-server
+  egress:
+    - toFQDNs:
+        - matchName: "api.openai.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# ── 4. Ingress: Allow health checks from kube-system ──────────────────────
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-healthcheck-ingress
+  namespace: codex-agents
+spec:
+  endpointSelector:
+    matchLabels:
+      app: codex-app-server
+  ingress:
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

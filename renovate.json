@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:base"],
+  "packageRules": [
+    {
+      "matchDatasources": ["docker"],
+      "matchPackagePatterns": ["^cgr.dev/chainguard/"],
+      "digest": { "enabled": true },
+      "schedule": ["every week"],
+      "automerge": false,
+      "labels": ["supply-chain", "digest-update"]
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security", "vulnerability"]
+  }
+}

@@ -1,0 +1,93 @@
+##############################################################################
+# Kyverno Policy: Require Kata RuntimeClass
+# Every pod in codex-agents MUST use the kata-qemu RuntimeClass.
+# Pods without runtimeClassName: kata-qemu are rejected at admission.
+# This ensures no agent bypasses VM-level isolation.
+##############################################################################
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-kata-runtimeclass
+  annotations:
+    policies.kyverno.io/title: Require Kata Containers RuntimeClass
+    policies.kyverno.io/category: Runtime Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >
+      All pods in the codex-agents namespace must specify
+      runtimeClassName: kata-qemu to ensure VM-level sandbox isolation.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-kata-runtimeclass
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [codex-agents]
+      validate:
+        message: >
+          Pods in codex-agents must use runtimeClassName: kata-qemu.
+          Direct runc/containerd execution is not permitted for agent workloads.
+        pattern:
+          spec:
+            runtimeClassName: "kata-qemu"
+---
+##############################################################################
+# Kyverno Policy: Require Read-Only Root Filesystem
+##############################################################################
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-readonly-rootfs
+  annotations:
+    policies.kyverno.io/title: Require Read-Only Root Filesystem
+    policies.kyverno.io/category: Runtime Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-readonly-rootfs
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [codex-agents]
+      validate:
+        message: "All containers must set readOnlyRootFilesystem: true."
+        foreach:
+          - list: "request.object.spec.containers"
+            pattern:
+              securityContext:
+                readOnlyRootFilesystem: true
+---
+##############################################################################
+# Kyverno Policy: Disallow Privilege Escalation
+##############################################################################
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privilege-escalation
+  annotations:
+    policies.kyverno.io/title: Disallow Privilege Escalation
+    policies.kyverno.io/category: Runtime Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-allowPrivilegeEscalation
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [codex-agents]
+      validate:
+        message: "allowPrivilegeEscalation must be set to false."
+        foreach:
+          - list: "request.object.spec.containers"
+            pattern:
+              securityContext:
+                allowPrivilegeEscalation: false

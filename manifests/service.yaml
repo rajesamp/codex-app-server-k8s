@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: codex-app-server
+  namespace: codex-agents
+  labels:
+    app: codex-app-server
+    app.kubernetes.io/component: app-server
+    app.kubernetes.io/part-of: codex-agent-sandbox
+spec:
+  selector:
+    app: codex-app-server
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: http
+  type: ClusterIP   # Internal-only; expose via Ingress + mTLS if external access needed

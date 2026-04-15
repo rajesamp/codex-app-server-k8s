@@ -1,0 +1,19 @@
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-qemu
+  labels:
+    app.kubernetes.io/component: isolation
+    app.kubernetes.io/part-of: codex-agent-sandbox
+handler: kata-qemu
+# Kata Containers provides a lightweight VM boundary per pod.
+# Each agent pod runs inside its own micro-VM (QEMU/KVM backed),
+# isolating the agent's execution environment from the host kernel
+# and from neighboring agent pods.
+scheduling:
+  nodeSelector:
+    katacontainers.io/kata-runtime: "true"
+overhead:
+  podFixed:
+    memory: "160Mi"
+    cpu: "250m"
