@@ -17,7 +17,7 @@ WORKDIR /app
 
 # Copy package manifests first for layer cache efficiency
 COPY package*.json ./
-RUN npm ci --only=production --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy application source
 COPY src/ ./src/
