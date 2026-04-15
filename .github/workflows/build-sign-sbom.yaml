@@ -183,7 +183,7 @@ jobs:
             "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.image-digest }}"
         # The signature is recorded to Rekor transparency log automatically.
         # Verifiable with: cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-        #   --certificate-identity-regexp "https://github.com/YOUR_ORG/.*" \
+        #   --certificate-identity-regexp "https://github.com/rajesamp/.*" \
         #   <image>@<digest>
 
   # ── Job 5: Generate & Attach SBOM ────────────────────────────────────────

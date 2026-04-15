@@ -34,7 +34,7 @@ This repo gives you Claude-style managed agents on your own Kubernetes cluster:
 
 ```bash
 # 1. Clone
-git clone https://github.com/YOUR_ORG/codex-app-server-k8s.git
+git clone https://github.com/rajesamp/codex-app-server-k8s.git
 cd codex-app-server-k8s
 
 # 2. Install SPIRE

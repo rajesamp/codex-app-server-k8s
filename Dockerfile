@@ -27,10 +27,10 @@ COPY src/ ./src/
 FROM cgr.dev/chainguard/node@sha256:RUNTIME_DIGEST_REPLACE_ME
 
 # OCI Annotations — used by cosign and SBOM tooling for provenance
-LABEL org.opencontainers.image.source="https://github.com/YOUR_ORG/codex-app-server-k8s"
+LABEL org.opencontainers.image.source="https://github.com/rajesamp/codex-app-server-k8s"
 LABEL org.opencontainers.image.description="Codex App Server — agent runtime on Kubernetes"
 LABEL org.opencontainers.image.licenses="MIT"
-LABEL org.opencontainers.image.vendor="Your Organization"
+LABEL org.opencontainers.image.vendor="rajesamp"
 
 WORKDIR /app
 

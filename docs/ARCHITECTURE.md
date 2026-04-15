@@ -366,8 +366,8 @@ kubectl exec -n codex-agents deploy/codex-app-server -- \
 ```bash
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp "https://github.com/YOUR_ORG/codex-app-server-k8s/.*" \
-  ghcr.io/YOUR_ORG/codex-app-server@sha256:<digest>
+  --certificate-identity-regexp "https://github.com/rajesamp/codex-app-server-k8s/.*" \
+  ghcr.io/rajesamp/codex-app-server@sha256:<digest>
 ```
 
 ### Verify SBOM attestation
@@ -376,8 +376,8 @@ cosign verify \
 cosign verify-attestation \
   --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp "https://github.com/YOUR_ORG/.*" \
-  ghcr.io/YOUR_ORG/codex-app-server@sha256:<digest>
+  --certificate-identity-regexp "https://github.com/rajesamp/.*" \
+  ghcr.io/rajesamp/codex-app-server@sha256:<digest>
 ```
 
 ### Add a new skill

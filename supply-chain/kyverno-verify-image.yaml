@@ -40,7 +40,7 @@ spec:
             - count: 1
               entries:
                 - keyless:
-                    subject: "https://github.com/YOUR_ORG/codex-app-server-k8s/.github/workflows/build-sign-sbom.yaml@refs/heads/main"
+                    subject: "https://github.com/rajesamp/codex-app-server-k8s/.github/workflows/build-sign-sbom.yaml@refs/heads/main"
                     issuer: "https://token.actions.githubusercontent.com"
                     rekor:
                       url: https://rekor.sigstore.dev
@@ -86,5 +86,5 @@ spec:
                 - count: 1
                   entries:
                     - keyless:
-                        subject: "https://github.com/YOUR_ORG/codex-app-server-k8s/.github/workflows/build-sign-sbom.yaml@refs/heads/main"
+                        subject: "https://github.com/rajesamp/codex-app-server-k8s/.github/workflows/build-sign-sbom.yaml@refs/heads/main"
                         issuer: "https://token.actions.githubusercontent.com"
