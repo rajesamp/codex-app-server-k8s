@@ -1,3 +1,50 @@
+# Dependencies
 node_modules/
 *.log
+
+# Environment / secrets — NEVER commit these
 .env
+.env.*
+*.env
+!*.env.example
+
+# Kubernetes credentials
+kubeconfig
+*.kubeconfig
+.kube/
+
+# Cloud provider credentials
+.aws/
+.gcp/
+.azure/
+credentials
+*_credentials.json
+service-account*.json
+serviceaccount*.json
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.pkcs8
+
+# cosign private key (if using keyed mode instead of keyless)
+cosign.key
+
+# SBOM / attestation artifacts (generated at CI time)
+*.spdx.json
+*.cyclonedx.json
+*.intoto.jsonl
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
