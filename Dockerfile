@@ -11,7 +11,7 @@
 
 # ── Stage 1: Builder ─────────────────────────────────────────────────────────
 # renovate: datasource=docker depName=cgr.dev/chainguard/node
-FROM cgr.dev/chainguard/node:latest-dev@sha256:BUILDER_DIGEST_REPLACE_ME AS builder
+FROM cgr.dev/chainguard/node:latest-dev@sha256:f86399a6ce3ce6311511228dbc8fad833ee491619799fca3187fb9a36b483fdb AS builder
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ COPY src/ ./src/
 
 # ── Stage 2: Runtime (distroless) ────────────────────────────────────────────
 # renovate: datasource=docker depName=cgr.dev/chainguard/node
-FROM cgr.dev/chainguard/node@sha256:RUNTIME_DIGEST_REPLACE_ME
+FROM cgr.dev/chainguard/node@sha256:13d25cd2ccb10ecb9f98b7694fcdef9405dcfac7925b9edd2b44869c0d3330b9
 
 # OCI Annotations — used by cosign and SBOM tooling for provenance
 LABEL org.opencontainers.image.source="https://github.com/rajesamp/codex-app-server-k8s"

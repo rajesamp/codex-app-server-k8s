@@ -137,7 +137,7 @@ spec:
         - name: spire-server
           # Chainguard SPIRE server — hardened, distroless, pinned digest
           # renovate: datasource=docker depName=cgr.dev/chainguard/spire-server
-          image: cgr.dev/chainguard/spire-server@sha256:d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2
+          image: cgr.dev/chainguard/spire-server@sha256:13d25cd2ccb10ecb9f98b7694fcdef9405dcfac7925b9edd2b44869c0d3330b9
           imagePullPolicy: Always
           args:
             - -config

@@ -104,7 +104,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       initContainers:
         - name: init-server-wait
-          image: cgr.dev/chainguard/busybox@sha256:a0a4a5f415b2df38ed4244c3ad1b3b8efceb74a64699c3c8e94b9a7dd75e69d7
+          image: cgr.dev/chainguard/busybox@sha256:f9ca35446158a61c6fc535fa3154d0378af13800834c46ade63c94f1fc25d839
           command:
             - sh
             - -c
@@ -121,7 +121,7 @@ spec:
       containers:
         - name: spire-agent
           # renovate: datasource=docker depName=cgr.dev/chainguard/spire-agent
-          image: cgr.dev/chainguard/spire-agent@sha256:e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3
+          image: cgr.dev/chainguard/spire-agent@sha256:13d25cd2ccb10ecb9f98b7694fcdef9405dcfac7925b9edd2b44869c0d3330b9
           imagePullPolicy: Always
           args:
             - -config
